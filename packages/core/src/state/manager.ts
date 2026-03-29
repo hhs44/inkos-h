@@ -2,6 +2,10 @@ import { readFile, writeFile, mkdir, readdir, rm, stat, unlink, open } from "nod
 import { join } from "node:path";
 import type { BookConfig } from "../models/book.js";
 import type { ChapterMeta } from "../models/chapter.js";
+import {
+  InteractiveBranchTreeSchema,
+  type InteractiveBranchTree,
+} from "../models/interactive-fiction.js";
 import { bootstrapStructuredStateFromMarkdown, resolveDurableStoryProgress } from "./state-bootstrap.js";
 
 export class StateManager {
@@ -145,6 +149,10 @@ export class StateManager {
     return join(this.bookDir(bookId), "story", "state");
   }
 
+  interactiveDir(bookId: string): string {
+    return join(this.bookDir(bookId), "story", "interactive");
+  }
+
   async loadProjectConfig(): Promise<Record<string, unknown>> {
     const configPath = join(this.projectRoot, "inkos.json");
     const raw = await readFile(configPath, "utf-8");
@@ -266,6 +274,60 @@ export class StateManager {
       JSON.stringify(index, null, 2),
       "utf-8",
     );
+  }
+
+  async loadBranchTree(bookId: string): Promise<InteractiveBranchTree | null> {
+    const treePath = join(this.interactiveDir(bookId), "branch-tree.json");
+    try {
+      const raw = await readFile(treePath, "utf-8");
+      return InteractiveBranchTreeSchema.parse(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  }
+
+  async saveBranchTree(bookId: string, tree: InteractiveBranchTree): Promise<void> {
+    const interactiveDir = this.interactiveDir(bookId);
+    await mkdir(interactiveDir, { recursive: true });
+    await writeFile(
+      join(interactiveDir, "branch-tree.json"),
+      JSON.stringify(InteractiveBranchTreeSchema.parse(tree), null, 2),
+      "utf-8",
+    );
+  }
+
+  async ensureInteractiveTree(bookId: string): Promise<InteractiveBranchTree> {
+    const existing = await this.loadBranchTree(bookId);
+    if (existing) {
+      return existing;
+    }
+
+    const rootTree: InteractiveBranchTree = {
+      version: 1,
+      activeNodeId: "root",
+      rootNodeId: "root",
+      nodes: [
+        {
+          nodeId: "root",
+          parentNodeId: null,
+          sourceChapterId: null,
+          sourceChapterNumber: 0,
+          branchDepth: 0,
+          branchLabel: "Main Route",
+          status: "active",
+          snapshotRef: {
+            chapterNumber: 0,
+          },
+          selectedChoiceId: null,
+          chapterIds: [],
+          displayPath: "main",
+        },
+      ],
+      choices: [],
+    };
+
+    await this.saveBranchTree(bookId, rootTree);
+    return rootTree;
   }
 
   async snapshotState(bookId: string, chapterNumber: number): Promise<void> {

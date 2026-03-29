@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { StateManager } from "../state/manager.js";
 import type { BookConfig } from "../models/book.js";
 import type { ChapterMeta } from "../models/chapter.js";
+import type { InteractiveBranchTree } from "../models/interactive-fiction.js";
 
 describe("StateManager", () => {
   let tempDir: string;
@@ -616,6 +617,76 @@ describe("StateManager", () => {
       expect(manager.stateDir("my-book")).toBe(
         join(tempDir, "books", "my-book", "story", "state"),
       );
+    });
+
+    it("interactiveDir returns <bookDir>/story/interactive", () => {
+      expect(manager.interactiveDir("my-book")).toBe(
+        join(tempDir, "books", "my-book", "story", "interactive"),
+      );
+    });
+  });
+
+  describe("interactive branch tree persistence", () => {
+    const tree: InteractiveBranchTree = {
+      version: 1,
+      activeNodeId: "root",
+      rootNodeId: "root",
+      nodes: [
+        {
+          nodeId: "root",
+          parentNodeId: null,
+          sourceChapterId: null,
+          sourceChapterNumber: 0,
+          branchDepth: 0,
+          branchLabel: "Main Route",
+          status: "active",
+          snapshotRef: { chapterNumber: 0 },
+          selectedChoiceId: null,
+          chapterIds: [],
+          displayPath: "main",
+        },
+      ],
+      choices: [],
+    };
+
+    it("round-trips branch tree through save and load", async () => {
+      await manager.saveBranchTree("interactive-book", tree);
+      const loaded = await manager.loadBranchTree("interactive-book");
+      expect(loaded).toEqual(tree);
+    });
+
+    it("returns null when no branch tree exists", async () => {
+      await expect(manager.loadBranchTree("missing-branch-tree")).resolves.toBeNull();
+    });
+
+    it("creates a root branch tree when ensuring interactive storage", async () => {
+      await manager.saveBookConfig("interactive-book", {
+        id: "interactive-book",
+        title: "Interactive Book",
+        platform: "tomato",
+        genre: "other",
+        status: "outlining",
+        targetChapters: 50,
+        chapterWordCount: 2200,
+        narrativeMode: "interactive-tree",
+        createdAt: "2026-03-30T00:00:00Z",
+        updatedAt: "2026-03-30T00:00:00Z",
+      });
+
+      const created = await manager.ensureInteractiveTree("interactive-book");
+
+      expect(created.rootNodeId).toBe("root");
+      expect(created.activeNodeId).toBe("root");
+      expect(created.nodes).toEqual([
+        expect.objectContaining({
+          nodeId: "root",
+          status: "active",
+          branchDepth: 0,
+        }),
+      ]);
+      await expect(
+        readFile(join(manager.interactiveDir("interactive-book"), "branch-tree.json"), "utf-8"),
+      ).resolves.toContain("\"rootNodeId\": \"root\"");
     });
   });
 
